@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GYAKU</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0a0a0f;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      overflow: hidden;
+      font-family: 'Courier New', monospace;
+    }
+    #game-container {
+      position: relative;
+    }
+    canvas {
+      display: block;
+      border: 2px solid #1a1a2e;
+      cursor: crosshair;
+    }
+    #hud {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: #00ff88;
+      font-size: 14px;
+      pointer-events: none;
+      text-shadow: 0 0 10px #00ff8855;
+    }
+    #hud div { margin-bottom: 4px; }
+    #zone-alert {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: #ff3366;
+      font-size: 28px;
+      font-weight: bold;
+      pointer-events: none;
+      text-shadow: 0 0 20px #ff336688;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    #death-screen {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(10, 10, 15, 0.92);
+      display: none;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      color: #ff3366;
+      font-size: 20px;
+    }
+    #death-screen h1 {
+      font-size: 48px;
+      margin-bottom: 20px;
+      text-shadow: 0 0 30px #ff336688;
+    }
+    #death-screen .stats { color: #aaa; margin: 6px 0; }
+    #death-screen .restart {
+      margin-top: 30px;
+      padding: 12px 40px;
+      background: none;
+      border: 2px solid #ff3366;
+      color: #ff3366;
+      font-family: 'Courier New', monospace;
+      font-size: 18px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    #death-screen .restart:hover {
+      background: #ff3366;
+      color: #0a0a0f;
+    }
+    #title-screen {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: #0a0a0f;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      color: #00ff88;
+      z-index: 10;
+    }
+    #title-screen h1 {
+      font-size: 72px;
+      letter-spacing: 20px;
+      text-shadow: 0 0 40px #00ff8855;
+      margin-bottom: 10px;
+    }
+    #title-screen .sub {
+      color: #666;
+      font-size: 14px;
+      margin-bottom: 40px;
+      letter-spacing: 4px;
+    }
+    #title-screen .controls {
+      color: #444;
+      font-size: 12px;
+      line-height: 2;
+      text-align: center;
+    }
+    #title-screen .start {
+      margin: 30px 0;
+      padding: 14px 50px;
+      background: none;
+      border: 2px solid #00ff88;
+      color: #00ff88;
+      font-family: 'Courier New', monospace;
+      font-size: 18px;
+      cursor: pointer;
+      letter-spacing: 6px;
+      transition: all 0.2s;
+    }
+    #title-screen .start:hover {
+      background: #00ff88;
+      color: #0a0a0f;
+    }
+    .material-bar {
+      display: flex;
+      gap: 12px;
+      position: absolute;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      pointer-events: none;
+    }
+    .mat-item {
+      padding: 4px 10px;
+      border: 1px solid #333;
+      font-size: 12px;
+      color: #888;
+    }
+    .mat-item.active { border-color: #00ff88; color: #00ff88; }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <canvas id="game" width="960" height="640"></canvas>
+    <div id="hud">
+      <div id="hp-bar"></div>
+      <div id="shield-bar"></div>
+      <div id="ammo-count"></div>
+      <div id="zone-num"></div>
+      <div id="kill-count"></div>
+    </div>
+    <div id="zone-alert"></div>
+    <div class="material-bar">
+      <div class="mat-item" id="mat-wood">WOOD: 0</div>
+      <div class="mat-item" id="mat-brick">BRICK: 0</div>
+      <div class="mat-item" id="mat-metal">METAL: 0</div>
+    </div>
+    <div id="death-screen">
+      <h1>ELIMINATED</h1>
+      <div class="stats" id="death-zone"></div>
+      <div class="stats" id="death-kills"></div>
+      <div class="stats" id="death-time"></div>
+      <button class="restart" onclick="game.restart()">TRY AGAIN</button>
+    </div>
+    <div id="title-screen">
+      <h1>GYAKU</h1>
+      <div class="sub">PROCEDURAL KAIZO ARENA</div>
+      <button class="start" onclick="game.start()">ENTER</button>
+      <div class="controls">
+        WASD - MOVE &nbsp;|&nbsp; MOUSE - AIM &nbsp;|&nbsp; CLICK - SHOOT<br>
+        Q - BUILD WALL &nbsp;|&nbsp; E - BUILD RAMP &nbsp;|&nbsp; R - RELOAD<br>
+        1/2/3 - MATERIAL &nbsp;|&nbsp; SPACE - DASH<br><br>
+        EVERY ZONE IS GENERATED. LEARN THE RULES. REACT OR DIE.
+      </div>
+    </div>
+  </div>
+  <script src="src/utils.js"></script>
+  <script src="src/procgen.js"></script>
+  <script src="src/entities.js"></script>
+  <script src="src/zones.js"></script>
+  <script src="src/player.js"></script>
+  <script src="src/combat.js"></script>
+  <script src="src/building.js"></script>
+  <script src="src/renderer.js"></script>
+  <script src="src/game.js"></script>
+</body>
+</html>
