@@ -100,13 +100,11 @@ class Enemy {
       case 'turret':
         this.aiTurret(dt, player, canSee, angleToPlayer, addBullet);
         break;
-      case 'builder':
-        this.aiBuilder(dt, player, zone, canSee, distToPlayer, angleToPlayer, addBullet);
-        break;
     }
   }
 
   hasLineOfSight(target, zone) {
+    // Bullets pass through windows — so should sight checks
     const T = ProcGen.TILE;
     const steps = Math.ceil(Utils.dist(this, target) / (T / 2));
     for (let i = 1; i < steps; i++) {
@@ -117,7 +115,7 @@ class Enemy {
       const row = Math.floor(cy / T);
       if (row >= 0 && row < ProcGen.ROWS && col >= 0 && col < ProcGen.COLS) {
         const tile = zone.tiles[row][col];
-        if (tile.type === 'wall' || tile.type === 'player_wall' || tile.type === 'player_ramp') {
+        if (tile.type === 'wall' || tile.type === 'player_wall' || tile.type === 'crate') {
           return false;
         }
       }
@@ -152,7 +150,8 @@ class Enemy {
       const row = Math.floor(p.y / T);
       if (row < 0 || row >= ProcGen.ROWS || col < 0 || col >= ProcGen.COLS) return false;
       const tile = zone.tiles[row][col];
-      if (tile.type === 'wall' || tile.type === 'player_wall' || tile.type === 'void') return false;
+      if (tile.type === 'wall' || tile.type === 'player_wall' || tile.type === 'player_window' ||
+          tile.type === 'crate' || tile.type === 'gap' || tile.type === 'void' || tile.type === 'low_gap') return false;
     }
     return true;
   }

@@ -1,24 +1,17 @@
 // ── Building System ──
-// Place walls and ramps using materials
+// Metal only. Two variants: WALL (solid) or WINDOW (shoot through, can't walk through).
+// Window placement is the core building riddle — wrong height/wrong column and the
+// enemy line-of-sight cuts you down.
 
 const Building = {
-  ghostTile: null, // Preview of where build will place
+  ghostTile: null,
 
-  matCosts: {
-    wood:  { wall: 10, ramp: 10 },
-    brick: { wall: 10, ramp: 10 },
-    metal: { wall: 10, ramp: 10 },
-  },
-
-  matHp: {
-    wood:  { wall: 100, ramp: 80 },
-    brick: { wall: 150, ramp: 120 },
-    metal: { wall: 200, ramp: 160 },
-  },
+  COSTS: { wall: 8, window: 12 },
+  HP:    { wall: 180, window: 140 },
 
   updateGhost(player) {
     const T = ProcGen.TILE;
-    const lookDist = T * 1.5;
+    const lookDist = T * 1.4;
     const gx = player.x + Math.cos(player.angle) * lookDist;
     const gy = player.y + Math.sin(player.angle) * lookDist;
     const col = Math.floor(gx / T);
@@ -31,55 +24,31 @@ const Building = {
     }
   },
 
-  buildWall(player, zone) {
+  build(player, zone) {
     if (player.buildCooldown > 0 || !this.ghostTile) return false;
 
-    const mat = player.currentMat;
-    const cost = this.matCosts[mat].wall;
-    if (player.materials[mat] < cost) return false;
+    const variant = player.buildMode;       // 'wall' or 'window'
+    const cost = this.COSTS[variant];
+    if (player.metal < cost) return false;
 
     const { row, col } = this.ghostTile;
     const tile = zone.tiles[row][col];
-    if (tile.type !== 'floor' && tile.type !== 'crumble' && tile.type !== 'void') return false;
+    if (tile.type !== 'floor' && tile.type !== 'crumble' && tile.type !== 'void' && tile.type !== 'low_gap') {
+      return false;
+    }
 
-    player.materials[mat] -= cost;
-    player.buildCooldown = 0.25;
-    zone.tiles[row][col] = {
-      type: 'player_wall',
-      hp: this.matHp[mat].wall,
-      material: mat,
-    };
+    player.metal -= cost;
+    player.buildCooldown = 0.18;
 
-    Combat.spawnHitParticles(
-      col * ProcGen.TILE + ProcGen.TILE / 2,
-      row * ProcGen.TILE + ProcGen.TILE / 2,
-      mat === 'wood' ? '#8B6914' : mat === 'brick' ? '#B85C38' : '#708090',
-      6
-    );
-
+    if (variant === 'wall') {
+      zone.tiles[row][col] = { type: 'player_wall', hp: this.HP.wall, material: 'metal' };
+    } else {
+      zone.tiles[row][col] = { type: 'player_window', hp: this.HP.window, material: 'metal' };
+    }
     return true;
   },
 
-  buildRamp(player, zone) {
-    if (player.buildCooldown > 0 || !this.ghostTile) return false;
-
-    const mat = player.currentMat;
-    const cost = this.matCosts[mat].ramp;
-    if (player.materials[mat] < cost) return false;
-
-    const { row, col } = this.ghostTile;
-    const tile = zone.tiles[row][col];
-    if (tile.type !== 'floor' && tile.type !== 'crumble' && tile.type !== 'void') return false;
-
-    player.materials[mat] -= cost;
-    player.buildCooldown = 0.25;
-    zone.tiles[row][col] = {
-      type: 'player_ramp',
-      hp: this.matHp[mat].ramp,
-      material: mat,
-      angle: player.angle,
-    };
-
-    return true;
+  toggleMode(player) {
+    player.buildMode = player.buildMode === 'wall' ? 'window' : 'wall';
   },
 };

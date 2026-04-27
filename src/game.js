@@ -36,6 +36,9 @@ const game = {
   },
 
   setupInput() {
+    if (this._wired) return;
+    this._wired = true;
+
     window.addEventListener('keydown', (e) => {
       const key = e.key.toLowerCase();
       this.player.keys[key] = true;
@@ -45,27 +48,21 @@ const game = {
           this.player.startReload();
           break;
         case 'q':
-          Building.buildWall(this.player, ZoneManager.currentZone);
+          Building.build(this.player, ZoneManager.currentZone);
           break;
-        case 'e':
-          Building.buildRamp(this.player, ZoneManager.currentZone);
+        case 'b':
+          Building.toggleMode(this.player);
           break;
         case ' ':
           e.preventDefault();
-          this.player.dash();
+          this.player.jump();
           break;
-        case '1':
-          this.player.currentMat = 'wood';
-          break;
-        case '2':
-          this.player.currentMat = 'brick';
-          break;
-        case '3':
-          this.player.currentMat = 'metal';
+        case 'shift':
+          this.player.slide();
           break;
         case 'tab':
           e.preventDefault();
-          this.player.currentWeapon = (this.player.currentWeapon + 1) % this.player.weapons.length;
+          this.player.toggleWeapon();
           break;
       }
     });
@@ -80,32 +77,23 @@ const game = {
       this.player.mouse.x = e.clientX - rect.left;
       this.player.mouse.y = e.clientY - rect.top;
     });
-
     canvas.addEventListener('mousedown', (e) => {
       if (e.button === 0) this.player.mouse.down = true;
+      if (e.button === 2) Building.build(this.player, ZoneManager.currentZone);
     });
-
     canvas.addEventListener('mouseup', (e) => {
       if (e.button === 0) this.player.mouse.down = false;
     });
-
-    canvas.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      // Right click = quick build wall
-      Building.buildWall(this.player, ZoneManager.currentZone);
-    });
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   },
 
   loop() {
     if (!this.running) return;
-
     const now = performance.now();
-    const dt = Math.min((now - this.lastTime) / 1000, 0.05); // Cap at 50ms
+    const dt = Math.min((now - this.lastTime) / 1000, 0.05);
     this.lastTime = now;
-
     this.update(dt);
     this.render(dt);
-
     requestAnimationFrame(() => this.loop());
   },
 
@@ -113,35 +101,20 @@ const game = {
     const zone = ZoneManager.currentZone;
     if (!zone) return;
 
-    // Player
     this.player.update(dt, (b) => Combat.addBullet(b));
-
-    // Building ghost
     Building.updateGhost(this.player);
 
-    // Enemies
     for (const e of zone.activeEnemies) {
-      e.update(dt, this.player, zone,
-        (b) => Combat.addBullet(b),
-        (p) => Combat.addParticle(p)
-      );
+      e.update(dt, this.player, zone, (b) => Combat.addBullet(b), (p) => Combat.addParticle(p));
     }
 
-    // Combat
     Combat.update(dt, this.player, zone);
 
-    // Zone mechanics
-    const zoneResult = ZoneManager.update(dt, this.player);
-    if (zoneResult === 'next_zone') {
-      this.nextZone();
-    }
+    const result = ZoneManager.update(dt, this.player);
+    if (result === 'next_zone') this.nextZone();
 
-    // Screen shake on player hit
-    if (this.player.hitFlash > 0.14) {
-      Renderer.shake(8);
-    }
+    if (this.player.hitFlash > 0.14) Renderer.shake(8);
 
-    // Death
     if (!this.player.alive) {
       this.running = false;
       this.showDeath();
@@ -154,11 +127,9 @@ const game = {
     Combat.reset();
     const zone = ZoneManager.loadZone(this.currentZone);
     this.player.spawn(zone.spawnPoint.x, zone.spawnPoint.y);
-    // Heal a bit between zones
-    this.player.hp = Math.min(this.player.hp + 20, this.player.maxHp);
-    this.player.shield = Math.min(this.player.shield + 10, this.player.maxShield);
-    // Refill some ammo
-    this.player.totalAmmo += 30;
+    // Modest heal — most resources come from chopping
+    this.player.hp = Math.min(this.player.hp + 25, this.player.maxHp);
+    this.player.totalAmmo = Math.min(this.player.totalAmmo + 30, 180);
   },
 
   render(dt) {
@@ -169,10 +140,11 @@ const game = {
     const elapsed = Math.floor((Date.now() - this.startTime) / 1000);
     const mins = Math.floor(elapsed / 60);
     const secs = elapsed % 60;
-
-    document.getElementById('death-zone').textContent = `Reached Zone ${this.currentZone} (${ZoneManager.currentZone?.archetype || '?'})`;
+    document.getElementById('death-zone').textContent =
+      `Reached Zone ${this.currentZone} (${ZoneManager.currentZone?.archetype || '?'})`;
     document.getElementById('death-kills').textContent = `Kills: ${this.player.kills}`;
-    document.getElementById('death-time').textContent = `Time: ${mins}:${secs.toString().padStart(2, '0')}`;
+    document.getElementById('death-time').textContent =
+      `Time: ${mins}:${secs.toString().padStart(2, '0')}`;
     document.getElementById('death-screen').style.display = 'flex';
   },
 };

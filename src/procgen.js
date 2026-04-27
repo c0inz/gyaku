@@ -1,22 +1,29 @@
 // ── Procedural Generation Engine ──
-// Generates zone layouts, hazard placements, enemy spawns, and loot tables.
-// Every run is unique. Zones get progressively harder.
+// Tile vocabulary:
+//   floor       — walkable
+//   wall        — destructible (axe primary, gun chips it)
+//   crate       — drops more metal when chopped
+//   gap         — pit; cross only with a jump
+//   low_gap     — squeeze; cross only with a slide
+//   crumble     — collapses after step
+//   window_slot — designer hint: "the window must go here for the riddle"
+//   player_wall / player_window — placed by player
 
 const ProcGen = {
   TILE: 40,
   COLS: 24,
   ROWS: 16,
 
-  // Zone archetypes — each has different generation rules
+  // Every archetype now centers on movement-tech + axe + window-placement riddles
   ARCHETYPES: [
-    'gauntlet',    // Linear corridor with timed hazards
-    'arena',       // Open space, wave-based enemies
-    'maze',        // Tight walls, turrets, limited visibility
-    'crumble',     // Floor tiles decay — keep moving or fall
-    'sniper_alley',// Long sightlines, must build cover to cross
-    'storm_rush',  // Closing storm circle, reach the safe zone
-    'mirror',      // Symmetrical room, enemies mirror your moves
-    'ambush',      // Looks safe, then everything activates at once
+    'jump_chasm',      // Pits across the room — jump with timing
+    'slide_corridor',  // Low ceilings — must slide to cross, then fight
+    'window_lane',     // Snipers behind cover — build a WINDOW at the right slot
+    'crumble_jumps',   // Crumble platforms over pits — jump between safe tiles
+    'arena_pillars',   // Open arena, axe enemies fast or kite with gun
+    'storm_squeeze',   // Storm closing, low_gaps in the way — slide for the safe core
+    'maze_chop',       // Maze of destructible walls — axe your shortcut
+    'ambush_riddle',   // Center has a window_slot — solve the line-of-sight before triggering
   ],
 
   generateZone(zoneNum) {
@@ -29,30 +36,29 @@ const ProcGen = {
       num: zoneNum,
       archetype,
       difficulty,
-      tiles: this.generateTiles(archetype, difficulty, rng),
+      tiles: this.blankTiles(),
       enemies: [],
       hazards: [],
-      loot: [],
       triggers: [],
+      windowSlots: [],          // tiles marked as "the riddle answer goes here"
       spawnPoint: { x: 80, y: 320 },
       exitPoint: { x: 880, y: 320 },
       rules: [],
       timer: null,
       stormRadius: null,
       stormCenter: null,
-      crumbleTiles: [],
     };
 
+    this.layoutFor(archetype, zone, difficulty, rng);
     this.populateZone(zone, archetype, difficulty, rng);
     return zone;
   },
 
-  generateTiles(archetype, difficulty, rng) {
+  blankTiles() {
     const tiles = [];
     for (let r = 0; r < this.ROWS; r++) {
       tiles[r] = [];
       for (let c = 0; c < this.COLS; c++) {
-        // Border walls
         if (r === 0 || r === this.ROWS - 1 || c === 0 || c === this.COLS - 1) {
           tiles[r][c] = { type: 'wall', hp: 999 };
         } else {
@@ -60,221 +66,218 @@ const ProcGen = {
         }
       }
     }
-
-    switch (archetype) {
-      case 'gauntlet':
-        this.genGauntlet(tiles, difficulty, rng);
-        break;
-      case 'arena':
-        this.genArena(tiles, difficulty, rng);
-        break;
-      case 'maze':
-        this.genMaze(tiles, difficulty, rng);
-        break;
-      case 'crumble':
-        this.genCrumble(tiles, difficulty, rng);
-        break;
-      case 'sniper_alley':
-        this.genSniperAlley(tiles, difficulty, rng);
-        break;
-      case 'storm_rush':
-        this.genStormRush(tiles, difficulty, rng);
-        break;
-      case 'mirror':
-        this.genMirror(tiles, difficulty, rng);
-        break;
-      case 'ambush':
-        this.genAmbush(tiles, difficulty, rng);
-        break;
-    }
-
     return tiles;
   },
 
-  genGauntlet(tiles, diff, rng) {
-    // Vertical wall segments with gaps — you zigzag through
-    for (let i = 0; i < 4 + Math.floor(diff); i++) {
-      const col = 4 + Math.floor(rng() * 16);
-      const gapRow = 1 + Math.floor(rng() * (this.ROWS - 4));
-      const gapSize = Math.max(2, 4 - Math.floor(diff * 0.5));
-      for (let r = 1; r < this.ROWS - 1; r++) {
-        if (r < gapRow || r >= gapRow + gapSize) {
-          tiles[r][col] = { type: 'wall', hp: 200 };
-        }
-      }
-    }
-  },
+  layoutFor(archetype, zone, diff, rng) {
+    const tiles = zone.tiles;
+    switch (archetype) {
 
-  genArena(tiles, diff, rng) {
-    // Scattered cover pillars
-    const pillars = 4 + Math.floor(rng() * 4);
-    for (let i = 0; i < pillars; i++) {
-      const r = 3 + Math.floor(rng() * (this.ROWS - 6));
-      const c = 3 + Math.floor(rng() * (this.COLS - 6));
-      const size = rng() > 0.5 ? 2 : 1;
-      for (let dr = 0; dr < size; dr++) {
-        for (let dc = 0; dc < size; dc++) {
-          if (r + dr < this.ROWS - 1 && c + dc < this.COLS - 1) {
-            tiles[r + dr][c + dc] = { type: 'wall', hp: 150 };
+      case 'jump_chasm': {
+        // Two or three vertical pits across the room. Pits are 2 tiles wide.
+        const chasmCount = 2 + Math.floor(diff * 0.5);
+        const positions = [];
+        for (let i = 0; i < chasmCount; i++) {
+          const c = 5 + Math.floor((i + 1) * (this.COLS - 8) / (chasmCount + 1));
+          positions.push(c);
+        }
+        for (const c of positions) {
+          for (let r = 1; r < this.ROWS - 1; r++) {
+            tiles[r][c] = { type: 'gap', hp: 0 };
+            tiles[r][c + 1] = { type: 'gap', hp: 0 };
+          }
+          // A few "rest" tiles inside the chasm to enable double-jump-style chains
+          const restRow = 2 + Math.floor(rng() * (this.ROWS - 4));
+          tiles[restRow][c] = { type: 'crumble', hp: 0, timer: 1.2, stepped: false };
+        }
+        break;
+      }
+
+      case 'slide_corridor': {
+        // Two or three horizontal walls with low_gap slits — slide to pass
+        for (let i = 0; i < 2 + Math.floor(diff); i++) {
+          const c = 5 + Math.floor((i + 1) * (this.COLS - 8) / (3 + Math.floor(diff)));
+          const slitRow = 2 + Math.floor(rng() * (this.ROWS - 4));
+          for (let r = 1; r < this.ROWS - 1; r++) {
+            tiles[r][c] = { type: 'wall', hp: 200 };
+          }
+          tiles[slitRow][c] = { type: 'low_gap', hp: 0 };
+        }
+        break;
+      }
+
+      case 'window_lane': {
+        // Long chambers separated by destructible walls.
+        // Designer marks a window_slot — solve the riddle by building a window there.
+        const dividerCol = Math.floor(this.COLS / 2);
+        for (let r = 1; r < this.ROWS - 1; r++) {
+          tiles[r][dividerCol] = { type: 'wall', hp: 200 };
+        }
+        // Two openings — one is the wrong height, one is the right height (sniper sight)
+        const slotRow = 2 + Math.floor(rng() * (this.ROWS - 4));
+        const decoyRow = (slotRow + 4 + Math.floor(rng() * 3)) % (this.ROWS - 2) + 1;
+        tiles[slotRow][dividerCol] = { type: 'floor', hp: 0 };
+        tiles[decoyRow][dividerCol] = { type: 'floor', hp: 0 };
+        zone.windowSlots.push({ row: slotRow, col: dividerCol });
+        break;
+      }
+
+      case 'crumble_jumps': {
+        // Sea of pits with crumble stepping-stones
+        for (let r = 2; r < this.ROWS - 2; r++) {
+          for (let c = 4; c < this.COLS - 4; c++) {
+            tiles[r][c] = { type: 'gap', hp: 0 };
           }
         }
+        // Lay a stepping path of crumble tiles
+        let cr = Math.floor(this.ROWS / 2);
+        for (let cc = 4; cc < this.COLS - 4; cc++) {
+          tiles[cr][cc] = { type: 'crumble', hp: 0, timer: 1.4, stepped: false };
+          if (rng() < 0.45) cr += rng() < 0.5 ? 1 : -1;
+          cr = Utils.clamp(cr, 2, this.ROWS - 3);
+        }
+        // A second branching path
+        let cr2 = Math.floor(this.ROWS / 2);
+        for (let cc = 5; cc < this.COLS - 4; cc += 2) {
+          tiles[cr2 + (rng() < 0.5 ? 1 : -1)][cc] = { type: 'crumble', hp: 0, timer: 1.6, stepped: false };
+        }
+        break;
       }
-    }
-  },
 
-  genMaze(tiles, diff, rng) {
-    // Simple maze using randomized walls
-    for (let r = 2; r < this.ROWS - 2; r += 2) {
-      for (let c = 2; c < this.COLS - 2; c += 2) {
-        if (rng() < 0.4 + diff * 0.05) {
+      case 'arena_pillars': {
+        // Scattered destructible cover
+        const pillars = 5 + Math.floor(diff);
+        for (let i = 0; i < pillars; i++) {
+          const r = 3 + Math.floor(rng() * (this.ROWS - 6));
+          const c = 4 + Math.floor(rng() * (this.COLS - 8));
           tiles[r][c] = { type: 'wall', hp: 120 };
-          // Extend wall in random direction
-          const dirs = [[0, 1], [1, 0], [0, -1], [-1, 0]];
-          const d = dirs[Math.floor(rng() * 4)];
-          const nr = r + d[0];
-          const nc = c + d[1];
-          if (nr > 0 && nr < this.ROWS - 1 && nc > 0 && nc < this.COLS - 1) {
-            tiles[nr][nc] = { type: 'wall', hp: 120 };
+          if (rng() < 0.3) tiles[r + 1] && (tiles[r + 1][c] = { type: 'wall', hp: 120 });
+        }
+        // A few crates — generous metal harvest if you axe them
+        for (let i = 0; i < 2; i++) {
+          const r = 3 + Math.floor(rng() * (this.ROWS - 6));
+          const c = 4 + Math.floor(rng() * (this.COLS - 8));
+          tiles[r][c] = { type: 'crate', hp: 60 };
+        }
+        break;
+      }
+
+      case 'storm_squeeze': {
+        // A few low_gap walls between you and the safe core
+        for (let i = 0; i < 2; i++) {
+          const c = 6 + i * 6;
+          const slitRow = 2 + Math.floor(rng() * (this.ROWS - 4));
+          for (let r = 1; r < this.ROWS - 1; r++) {
+            if (rng() < 0.7) tiles[r][c] = { type: 'wall', hp: 150 };
+          }
+          tiles[slitRow][c] = { type: 'low_gap', hp: 0 };
+        }
+        break;
+      }
+
+      case 'maze_chop': {
+        // Dense maze of destructible walls — axe is faster than going around
+        for (let r = 2; r < this.ROWS - 2; r += 2) {
+          for (let c = 2; c < this.COLS - 2; c++) {
+            if (rng() < 0.55) tiles[r][c] = { type: 'wall', hp: 80 };
           }
         }
-      }
-    }
-  },
-
-  genCrumble(tiles, diff, rng) {
-    // Mark most floor tiles as crumble
-    for (let r = 1; r < this.ROWS - 1; r++) {
-      for (let c = 1; c < this.COLS - 1; c++) {
-        if (tiles[r][c].type === 'floor' && rng() < 0.7) {
-          tiles[r][c] = { type: 'crumble', hp: 0, timer: 1.5 + rng() * 1.5 - diff * 0.3, stepped: false };
+        // A few crates hidden as reward
+        for (let i = 0; i < 3; i++) {
+          const r = 3 + Math.floor(rng() * (this.ROWS - 6));
+          const c = 3 + Math.floor(rng() * (this.COLS - 6));
+          tiles[r][c] = { type: 'crate', hp: 60 };
         }
+        break;
       }
-    }
-  },
 
-  genSniperAlley(tiles, diff, rng) {
-    // Long horizontal corridors with peek holes
-    for (let r = 4; r < this.ROWS - 4; r += 4) {
-      for (let c = 1; c < this.COLS - 1; c++) {
-        if (rng() > 0.15) {
-          tiles[r][c] = { type: 'wall', hp: 180 };
+      case 'ambush_riddle': {
+        // Open chamber. Marked window_slot near center.
+        // Trigger triggers enemies — if you've placed a window facing them, you win the LOS war.
+        const sr = Math.floor(this.ROWS / 2);
+        const sc = Math.floor(this.COLS / 2);
+        zone.windowSlots.push({ row: sr, col: sc });
+        // A ring of pillars
+        const ringPositions = [
+          [sr - 3, sc], [sr + 3, sc], [sr, sc - 4], [sr, sc + 4],
+          [sr - 2, sc - 3], [sr - 2, sc + 3], [sr + 2, sc - 3], [sr + 2, sc + 3],
+        ];
+        for (const [rr, cc] of ringPositions) {
+          if (rr > 0 && rr < this.ROWS - 1 && cc > 0 && cc < this.COLS - 1) {
+            tiles[rr][cc] = { type: 'wall', hp: 100 };
+          }
         }
+        break;
       }
-    }
-  },
-
-  genStormRush(tiles, diff, rng) {
-    // Open field with scattered debris
-    for (let i = 0; i < 6; i++) {
-      const r = 2 + Math.floor(rng() * (this.ROWS - 4));
-      const c = 2 + Math.floor(rng() * (this.COLS - 4));
-      tiles[r][c] = { type: 'wall', hp: 100 };
-    }
-  },
-
-  genMirror(tiles, diff, rng) {
-    // Symmetrical layout
-    for (let r = 1; r < this.ROWS - 1; r++) {
-      for (let c = 1; c < Math.floor(this.COLS / 2); c++) {
-        if (rng() < 0.12 + diff * 0.02) {
-          tiles[r][c] = { type: 'wall', hp: 150 };
-          tiles[r][this.COLS - 1 - c] = { type: 'wall', hp: 150 };
-        }
-      }
-    }
-  },
-
-  genAmbush(tiles, diff, rng) {
-    // Looks empty, just a few crates
-    for (let i = 0; i < 3; i++) {
-      const r = 3 + Math.floor(rng() * (this.ROWS - 6));
-      const c = 3 + Math.floor(rng() * (this.COLS - 6));
-      tiles[r][c] = { type: 'crate', hp: 80, loot: true };
     }
   },
 
   populateZone(zone, archetype, diff, rng) {
     const T = this.TILE;
 
-    // Place exit
-    const exitCol = this.COLS - 3;
-    const exitRow = 1 + Math.floor(rng() * (this.ROWS - 3));
-    zone.exitPoint = { x: exitCol * T + T / 2, y: exitRow * T + T / 2 };
-    // Clear exit area
-    zone.tiles[exitRow][exitCol] = { type: 'floor', hp: 0 };
-    zone.tiles[exitRow][exitCol + 1] = { type: 'floor', hp: 0 };
-
-    // Place spawn
-    const spawnRow = 1 + Math.floor(rng() * (this.ROWS - 3));
+    // Spawn / exit on opposite sides
+    const spawnRow = Math.floor(this.ROWS / 2);
     zone.spawnPoint = { x: 2 * T, y: spawnRow * T + T / 2 };
     zone.tiles[spawnRow][1] = { type: 'floor', hp: 0 };
     zone.tiles[spawnRow][2] = { type: 'floor', hp: 0 };
 
-    // Enemies
-    const enemyCount = Math.floor(2 + diff * 1.5 + rng() * 2);
+    const exitRow = 1 + Math.floor(rng() * (this.ROWS - 3));
+    const exitCol = this.COLS - 3;
+    zone.exitPoint = { x: exitCol * T + T / 2, y: exitRow * T + T / 2 };
+    zone.tiles[exitRow][exitCol] = { type: 'floor', hp: 0 };
+    zone.tiles[exitRow][exitCol + 1] = { type: 'floor', hp: 0 };
+
+    // Enemies — fewer, higher quality, encourage axe engagements
+    const enemyCount = Math.floor(2 + diff * 1.2);
     for (let i = 0; i < enemyCount; i++) {
-      let ex, ey, attempts = 0;
+      let ex, ey, attempts = 0, valid = false;
       do {
-        ex = (3 + Math.floor(rng() * (this.COLS - 6))) * T + T / 2;
+        ex = (4 + Math.floor(rng() * (this.COLS - 8))) * T + T / 2;
         ey = (2 + Math.floor(rng() * (this.ROWS - 4))) * T + T / 2;
+        const col = Math.floor(ex / T), row = Math.floor(ey / T);
+        const t = zone.tiles[row][col].type;
+        valid = t === 'floor' && Utils.dist({ x: ex, y: ey }, zone.spawnPoint) > 200;
         attempts++;
-      } while (Utils.dist({ x: ex, y: ey }, zone.spawnPoint) < 150 && attempts < 20);
+      } while (!valid && attempts < 25);
+      if (!valid) continue;
 
       const type = this.pickEnemyType(archetype, diff, rng);
       zone.enemies.push({ x: ex, y: ey, type, ...this.enemyStats(type, diff) });
     }
 
-    // Hazards
+    // Hazards — fewer, more meaningful
     this.placeHazards(zone, archetype, diff, rng);
-
-    // Loot
-    const lootCount = Math.floor(2 + rng() * 3);
-    for (let i = 0; i < lootCount; i++) {
-      const lx = (3 + Math.floor(rng() * (this.COLS - 6))) * T + T / 2;
-      const ly = (2 + Math.floor(rng() * (this.ROWS - 4))) * T + T / 2;
-      zone.loot.push({
-        x: lx, y: ly,
-        type: Utils.pick(['ammo', 'health', 'shield', 'material', 'weapon_up']),
-        collected: false,
-      });
-    }
-
-    // Zone-specific rules
     this.applyRules(zone, archetype, diff);
 
-    // Storm for storm_rush
-    if (archetype === 'storm_rush') {
+    if (archetype === 'storm_squeeze') {
       zone.stormCenter = { x: zone.exitPoint.x, y: zone.exitPoint.y };
       zone.stormRadius = 600;
-      zone.stormShrinkRate = 15 + diff * 8;
+      zone.stormShrinkRate = 18 + diff * 8;
       zone.stormMinRadius = 60;
       zone.stormDamage = 3 + diff * 2;
     }
 
-    // Timer for timed zones
-    if (archetype === 'gauntlet' || archetype === 'crumble') {
-      zone.timer = Math.max(10, 25 - diff * 2);
+    if (archetype === 'jump_chasm' || archetype === 'crumble_jumps' || archetype === 'slide_corridor') {
+      zone.timer = Math.max(15, 32 - diff * 2);
     }
   },
 
   pickEnemyType(archetype, diff, rng) {
-    const types = ['grunt', 'shooter', 'rusher'];
-    if (diff > 1.5) types.push('turret');
-    if (diff > 2.0) types.push('builder');
-    if (archetype === 'sniper_alley') return rng() > 0.4 ? 'sniper' : 'shooter';
-    if (archetype === 'arena') return Utils.pick(types);
-    if (archetype === 'ambush') return 'rusher';
-    return types[Math.floor(rng() * types.length)];
+    if (archetype === 'window_lane' || archetype === 'ambush_riddle') {
+      return rng() > 0.4 ? 'sniper' : 'turret';
+    }
+    if (archetype === 'arena_pillars') return Utils.pick(['shooter', 'rusher', diff > 1.5 ? 'turret' : 'grunt']);
+    if (archetype === 'maze_chop') return Utils.pick(['grunt', 'rusher']);
+    return Utils.pick(['grunt', 'shooter', 'rusher']);
   },
 
   enemyStats(type, diff) {
     const base = {
       grunt:   { hp: 60, speed: 80, damage: 8, fireRate: 1.2, range: 200, ai: 'patrol' },
       shooter: { hp: 50, speed: 60, damage: 12, fireRate: 0.8, range: 350, ai: 'hold' },
-      rusher:  { hp: 40, speed: 160, damage: 15, fireRate: 0.5, range: 100, ai: 'rush' },
-      sniper:  { hp: 35, speed: 40, damage: 30, fireRate: 2.0, range: 500, ai: 'hold' },
-      turret:  { hp: 100, speed: 0, damage: 10, fireRate: 0.3, range: 300, ai: 'turret' },
-      builder: { hp: 70, speed: 90, damage: 10, fireRate: 1.0, range: 250, ai: 'builder' },
+      rusher:  { hp: 40, speed: 160, damage: 15, fireRate: 0.6, range: 100, ai: 'rush' },
+      sniper:  { hp: 35, speed: 40, damage: 35, fireRate: 2.2, range: 600, ai: 'hold' },
+      turret:  { hp: 100, speed: 0, damage: 10, fireRate: 0.35, range: 300, ai: 'turret' },
     };
     const s = { ...base[type] };
     s.hp = Math.floor(s.hp * (0.8 + diff * 0.3));
@@ -285,23 +288,18 @@ const ProcGen = {
 
   placeHazards(zone, archetype, diff, rng) {
     const T = this.TILE;
-    const count = Math.floor(2 + diff * 1.5);
-
+    const count = 1 + Math.floor(diff);
     for (let i = 0; i < count; i++) {
-      const hx = (3 + Math.floor(rng() * (this.COLS - 6))) * T;
+      const hx = (4 + Math.floor(rng() * (this.COLS - 8))) * T;
       const hy = (2 + Math.floor(rng() * (this.ROWS - 4))) * T;
-
-      const hazardTypes = ['spike_trap', 'fire_vent', 'laser'];
-      if (archetype === 'gauntlet') hazardTypes.push('moving_wall');
-      if (diff > 1.5) hazardTypes.push('mine');
-
+      const types = ['spike_trap', 'fire_vent', 'laser'];
       zone.hazards.push({
         x: hx, y: hy, w: T, h: T,
-        type: hazardTypes[Math.floor(rng() * hazardTypes.length)],
+        type: Utils.pick(types),
         active: true,
-        cycleTime: 1.5 + rng() * 2,
+        cycleTime: 1.5 + rng() * 1.5,
         cycleTimer: rng() * 3,
-        damage: Math.floor(10 + diff * 5),
+        damage: Math.floor(12 + diff * 5),
       });
     }
   },
@@ -309,37 +307,38 @@ const ProcGen = {
   applyRules(zone, archetype, diff) {
     const rules = [];
     switch (archetype) {
-      case 'gauntlet':
-        rules.push('TIMED — reach the exit before time runs out');
-        rules.push('Walls block your path — find the gaps or build over');
+      case 'jump_chasm':
+        rules.push('PITS — jump (SPACE) to cross');
+        rules.push('Crumble tiles inside the chasm collapse — chain jumps');
         break;
-      case 'arena':
-        rules.push('CLEAR ALL ENEMIES to unlock the exit');
+      case 'slide_corridor':
+        rules.push('LOW GAPS — slide (SHIFT) to squeeze through');
+        rules.push('Walls are destructible — axe (LMB w/ axe) cuts a new path');
+        break;
+      case 'window_lane':
+        rules.push('SNIPERS behind cover — build a WINDOW at the right slot to fire back');
+        rules.push('Press B to toggle build mode (WALL <-> WINDOW). Q to place');
         zone.exitLocked = true;
         break;
-      case 'maze':
-        rules.push('TIGHT QUARTERS — turrets cover the corridors');
-        rules.push('Walls are destructible — blast your own path');
+      case 'crumble_jumps':
+        rules.push('STEPPING STONES over the void — jump between crumble tiles');
+        rules.push('Tiles collapse after one step — keep moving');
         break;
-      case 'crumble':
-        rules.push('FLOOR DECAYS — tiles crumble after you step on them');
-        rules.push('Build bridges or keep moving');
+      case 'arena_pillars':
+        rules.push('CLEAR ENEMIES to unlock the exit');
+        rules.push('Axe enemies for a one-shot melee (high damage)');
+        zone.exitLocked = true;
         break;
-      case 'sniper_alley':
-        rules.push('LONG SIGHTLINES — build cover or get picked off');
-        rules.push('Snipers deal massive damage');
+      case 'storm_squeeze':
+        rules.push('STORM CLOSING — slide through the low gaps to reach the core');
         break;
-      case 'storm_rush':
-        rules.push('STORM CLOSING — get to the safe zone');
-        rules.push('Storm deals increasing damage over time');
+      case 'maze_chop':
+        rules.push('AXE YOUR SHORTCUT through destructible walls');
+        rules.push('Walls drop METAL when broken — fuel your builds');
         break;
-      case 'mirror':
-        rules.push('MIRRORED — enemies copy your movements');
-        rules.push('Symmetrical layout — flank carefully');
-        break;
-      case 'ambush':
-        rules.push('LOOKS SAFE — it is not');
-        rules.push('Enemies activate when you reach the center');
+      case 'ambush_riddle':
+        rules.push('LOOKS QUIET — center triggers the ambush');
+        rules.push('Pre-build a WINDOW facing the spawn before stepping in');
         zone.ambushTriggered = false;
         break;
     }

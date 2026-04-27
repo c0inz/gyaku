@@ -1,5 +1,6 @@
-// ── Combat System ──
-// Bullet collision, damage calculation, hit effects
+// ── Combat ──
+// Bullets + axe-swing resolution. No loot drops. Particles minimized to 1-2 sparks
+// on impact for feedback only.
 
 const Combat = {
   bullets: [],
@@ -10,56 +11,27 @@ const Combat = {
     this.particles = [];
   },
 
-  addBullet(bullet) {
-    this.bullets.push(bullet);
-  },
+  addBullet(b) { this.bullets.push(b); },
+  addParticle(p) { this.particles.push(p); },
 
-  addParticle(p) {
-    this.particles.push(p);
-  },
-
-  spawnHitParticles(x, y, color, count = 5) {
-    for (let i = 0; i < count; i++) {
-      this.particles.push(new Particle(
-        x, y,
-        Utils.rand(-120, 120),
-        Utils.rand(-120, 120),
-        color,
-        Utils.rand(0.2, 0.5),
-        Utils.rand(2, 5)
-      ));
-    }
-  },
-
-  spawnDeathParticles(x, y) {
-    for (let i = 0; i < 20; i++) {
-      const a = Utils.rand(0, Math.PI * 2);
-      const s = Utils.rand(50, 200);
-      this.particles.push(new Particle(
-        x, y,
-        Math.cos(a) * s, Math.sin(a) * s,
-        Utils.pick(['#ff4444', '#ff8844', '#ffcc00']),
-        Utils.rand(0.3, 0.8),
-        Utils.rand(3, 8)
-      ));
-    }
+  spark(x, y, color) {
+    this.particles.push(new Particle(x, y, Utils.rand(-40, 40), Utils.rand(-40, 40), color, 0.15, 2));
   },
 
   update(dt, player, zone) {
-    // Update bullets
+    // Bullets
     for (const b of this.bullets) {
       if (!b.alive) continue;
       b.update(dt);
 
-      // World collision
+      // Walls block bullets — windows and low_gaps do not
       if (ZoneManager.isWall(b.x, b.y)) {
         b.alive = false;
         ZoneManager.damageTile(b.x, b.y, b.damage);
-        this.spawnHitParticles(b.x, b.y, '#888888');
+        this.spark(b.x, b.y, '#888');
         continue;
       }
 
-      // Player bullet → enemy
       if (b.owner === 'player') {
         for (const e of zone.activeEnemies) {
           if (!e.alive) continue;
@@ -67,62 +39,39 @@ const Combat = {
             b.alive = false;
             e.takeDamage(b.damage);
             player.damageDealt += b.damage;
-            this.spawnHitParticles(b.x, b.y, '#ff4444');
-            if (!e.alive) {
-              player.kills++;
-              this.spawnDeathParticles(e.x, e.y);
-              // Drop materials
-              this.dropLoot(e.x, e.y, zone);
-            }
+            this.spark(b.x, b.y, '#ff6644');
+            if (!e.alive) player.kills++;
             break;
           }
         }
       }
 
-      // Enemy bullet → player
-      if (b.owner === 'enemy') {
-        if (Utils.dist(b, player) < player.radius + b.radius) {
+      if (b.owner === 'enemy' && !player.airborne) {
+        if (Utils.dist(b, player) < player.hitboxRadius() + b.radius) {
           b.alive = false;
           player.takeDamage(b.damage, 'bullet');
-          this.spawnHitParticles(player.x, player.y, '#00ff88');
+          this.spark(b.x, b.y, '#00ff88');
         }
       }
 
-      // Out of bounds
-      if (b.x < 0 || b.x > ProcGen.COLS * ProcGen.TILE ||
-          b.y < 0 || b.y > ProcGen.ROWS * ProcGen.TILE) {
-        b.alive = false;
-      }
+      const W = ProcGen.COLS * ProcGen.TILE;
+      const H = ProcGen.ROWS * ProcGen.TILE;
+      if (b.x < 0 || b.x > W || b.y < 0 || b.y > H) b.alive = false;
     }
 
-    // Update particles
-    for (const p of this.particles) {
-      p.update(dt);
+    // Axe melee
+    const axed = player.axeHits ? player.axeHits(zone.activeEnemies) : [];
+    for (const e of axed) {
+      e.takeDamage(player.axe.damage);
+      player.damageDealt += player.axe.damage;
+      this.spark(e.x, e.y, '#ffffff');
+      if (!e.alive) player.kills++;
     }
 
-    // Cleanup
+    // Particles
+    for (const p of this.particles) p.update(dt);
+
     this.bullets = this.bullets.filter(b => b.alive);
     this.particles = this.particles.filter(p => p.alive);
-
-    // Loot pickup
-    for (const l of zone.loot) {
-      if (l.collected) continue;
-      if (Utils.dist(player, l) < 25) {
-        l.collected = true;
-        player.collectLoot(l);
-        this.spawnHitParticles(l.x, l.y, '#00ff88', 8);
-      }
-    }
-  },
-
-  dropLoot(x, y, zone) {
-    if (Math.random() < 0.4) {
-      zone.loot.push({
-        x: x + Utils.rand(-15, 15),
-        y: y + Utils.rand(-15, 15),
-        type: Utils.pick(['ammo', 'health', 'material']),
-        collected: false,
-      });
-    }
   },
 };
